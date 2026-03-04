@@ -289,6 +289,7 @@ fn swapProviderIfNeeded(self: anytype, model: []const u8) !void {
         resolved_key,
         base_url,
         native_tools,
+        null,
     );
 
     self.provider = holder.provider();
