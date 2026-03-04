@@ -2589,6 +2589,7 @@ fn runSignalChannel(allocator: std.mem.Allocator, args: []const []const u8, conf
         .workspace_dir = config.workspace_dir,
         .workspace_only = config.autonomy.workspace_only,
         .allowed_commands = security.resolveAllowedCommands(config.autonomy.level, config.autonomy.allowed_commands),
+        .blocked_commands = config.autonomy.blocked_commands,
         .max_actions_per_hour = config.autonomy.max_actions_per_hour,
         .require_approval_for_medium_risk = config.autonomy.require_approval_for_medium_risk,
         .block_high_risk_commands = config.autonomy.block_high_risk_commands,
@@ -2617,6 +2618,7 @@ fn runSignalChannel(allocator: std.mem.Allocator, args: []const []const u8, conf
     const tools = yc.tools.allTools(allocator, config.workspace_dir, .{
         .http_enabled = config.http_request.enabled,
         .http_allowed_domains = config.http_request.allowed_domains,
+                    .http_trusted_local_hosts = config.http_request.trusted_local_hosts,
         .http_max_response_size = config.http_request.max_response_size,
         .http_timeout_secs = config.http_request.timeout_secs,
         .web_search_base_url = config.http_request.search_base_url,
@@ -3126,6 +3128,7 @@ fn runTelegramChannel(allocator: std.mem.Allocator, args: []const []const u8, co
         .workspace_dir = config.workspace_dir,
         .workspace_only = config.autonomy.workspace_only,
         .allowed_commands = security.resolveAllowedCommands(config.autonomy.level, config.autonomy.allowed_commands),
+        .blocked_commands = config.autonomy.blocked_commands,
         .max_actions_per_hour = config.autonomy.max_actions_per_hour,
         .require_approval_for_medium_risk = config.autonomy.require_approval_for_medium_risk,
         .block_high_risk_commands = config.autonomy.block_high_risk_commands,
@@ -3154,6 +3157,7 @@ fn runTelegramChannel(allocator: std.mem.Allocator, args: []const []const u8, co
     const tools = yc.tools.allTools(allocator, config.workspace_dir, .{
         .http_enabled = config.http_request.enabled,
         .http_allowed_domains = config.http_request.allowed_domains,
+                    .http_trusted_local_hosts = config.http_request.trusted_local_hosts,
         .http_max_response_size = config.http_request.max_response_size,
         .http_timeout_secs = config.http_request.timeout_secs,
         .web_search_base_url = config.http_request.search_base_url,

@@ -84,6 +84,7 @@ pub const SecurityPolicy = struct {
     workspace_dir: []const u8 = ".",
     workspace_only: bool = true,
     allowed_commands: []const []const u8 = &default_allowed_commands,
+    blocked_commands: []const []const u8 = &.{},
     max_actions_per_hour: u32 = 20,
     require_approval_for_medium_risk: bool = true,
     block_high_risk_commands: bool = true,
@@ -241,6 +242,13 @@ pub const SecurityPolicy = struct {
             // rm/trash BOOTSTRAP.md (single safe target only).
             if (isSafeBootstrapDeleteCommandSegment(cmd_part)) {
                 continue;
+            }
+
+            // Blocklist takes priority — reject before checking allowlist
+            for (self.blocked_commands) |raw_blocked| {
+                const blocked = std.mem.trim(u8, raw_blocked, " \t\r\n");
+                if (blocked.len == 0) continue;
+                if (std.mem.eql(u8, blocked, base_cmd)) return false;
             }
 
             var found = false;

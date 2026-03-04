@@ -792,6 +792,9 @@ pub fn parseJson(self: *Config, content: []const u8) !void {
             if (aut.object.get("allow_raw_url_chars")) |v| {
                 if (v == .bool) self.autonomy.allow_raw_url_chars = v.bool;
             }
+            if (aut.object.get("blocked_commands")) |v| {
+                if (v == .array) self.autonomy.blocked_commands = try parseStringArray(self.allocator, v.array);
+            }
             // forbidden_paths: ignored (removed — path security handled by path_security.zig)
             if (aut.object.get("allowed_paths")) |v| {
                 if (v == .array) self.autonomy.allowed_paths = try parseStringArray(self.allocator, v.array);
@@ -1733,6 +1736,9 @@ pub fn parseJson(self: *Config, content: []const u8) !void {
             }
             if (hr.object.get("proxy")) |v| {
                 if (v == .string) self.http_request.proxy = try self.allocator.dupe(u8, v.string);
+            }
+            if (hr.object.get("trusted_local_hosts")) |v| {
+                if (v == .array) self.http_request.trusted_local_hosts = try parseStringArray(self.allocator, v.array);
             }
             if (hr.object.get("search_base_url")) |v| {
                 if (v == .string) self.http_request.search_base_url = try self.allocator.dupe(u8, v.string);

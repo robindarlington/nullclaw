@@ -175,6 +175,21 @@ fn memoryRuntimePtr(self: anytype) ?*memory_mod.MemoryRuntime {
     return if (@hasField(@TypeOf(self.*), "mem_rt")) self.mem_rt else null;
 }
 
+/// Resolve short model aliases to full provider/model references.
+fn resolveModelAlias(name: []const u8) []const u8 {
+    const aliases = .{
+        .{ "opus", "anthropic/claude-opus-4-6" },
+        .{ "sonnet", "anthropic/claude-sonnet-4-6" },
+        .{ "haiku", "anthropic/claude-haiku-4-5" },
+        .{ "g3f", "openrouter/google/gemini-3-flash-preview" },
+        .{ "gf3", "openrouter/google/gemini-3-flash-preview" },
+    };
+    inline for (aliases) |entry| {
+        if (std.ascii.eqlIgnoreCase(name, entry[0])) return entry[1];
+    }
+    return name;
+}
+
 fn setModelName(self: anytype, model: []const u8) !void {
     const owned_model = try self.allocator.dupe(u8, model);
     if (self.model_name_owned) self.allocator.free(self.model_name);
@@ -203,6 +218,29 @@ fn setModelName(self: anytype, model: []const u8) !void {
     }
 }
 
+fn refreshModelLimits(self: anytype, model_ref: []const u8) void {
+    if (@hasField(@TypeOf(self.*), "token_limit")) {
+        const token_limit_override: ?u64 = if (@hasField(@TypeOf(self.*), "token_limit_override"))
+            self.token_limit_override
+        else
+            null;
+        self.token_limit = context_tokens.resolveContextTokens(token_limit_override, model_ref);
+    }
+
+    if (@hasField(@TypeOf(self.*), "max_tokens")) {
+        const max_tokens_override: ?u32 = if (@hasField(@TypeOf(self.*), "max_tokens_override"))
+            self.max_tokens_override
+        else
+            null;
+        var resolved_max_tokens = max_tokens_resolver.resolveMaxTokens(max_tokens_override, model_ref);
+        if (@hasField(@TypeOf(self.*), "token_limit")) {
+            const token_limit_cap: u32 = @intCast(@min(self.token_limit, @as(u64, std.math.maxInt(u32))));
+            resolved_max_tokens = @min(resolved_max_tokens, token_limit_cap);
+        }
+        self.max_tokens = resolved_max_tokens;
+    }
+}
+
 fn setDefaultProvider(self: anytype, provider_name: []const u8) !void {
     if (!@hasField(@TypeOf(self.*), "default_provider")) return;
     const owned_provider = try self.allocator.dupe(u8, provider_name);
@@ -211,6 +249,50 @@ fn setDefaultProvider(self: anytype, provider_name: []const u8) !void {
         self.default_provider_owned = true;
     }
     self.default_provider = owned_provider;
+}
+
+/// Swap the runtime provider when the model's provider prefix differs from default_provider.
+/// Heap-allocates a new ProviderHolder so the vtable stays valid. The old provider is not freed
+/// (tiny leak per /model switch, acceptable for a long-running daemon).
+fn swapProviderIfNeeded(self: anytype, model: []const u8) !void {
+    const parsed = splitPrimaryModelRef(model) orelse return;
+
+    if (@hasField(@TypeOf(self.*), "default_provider")) {
+        if (std.mem.eql(u8, self.default_provider, parsed.provider)) return;
+    }
+
+    var resolved_key: ?[]u8 = null;
+    if (@hasField(@TypeOf(self.*), "configured_providers")) {
+        resolved_key = providers.resolveApiKeyFromConfig(
+            self.allocator,
+            parsed.provider,
+            self.configured_providers,
+        ) catch null;
+    }
+
+    var base_url: ?[]const u8 = null;
+    var native_tools: bool = true;
+    if (@hasField(@TypeOf(self.*), "configured_providers")) {
+        for (self.configured_providers) |entry| {
+            if (std.mem.eql(u8, entry.name, parsed.provider)) {
+                base_url = entry.base_url;
+                native_tools = entry.native_tools;
+                break;
+            }
+        }
+    }
+
+    const holder = try self.allocator.create(providers.ProviderHolder);
+    holder.* = providers.ProviderHolder.fromConfig(
+        self.allocator,
+        parsed.provider,
+        resolved_key,
+        base_url,
+        native_tools,
+    );
+
+    self.provider = holder.provider();
+    try setDefaultProvider(self, parsed.provider);
 }
 
 fn isConfiguredProviderName(self: anytype, provider_name: []const u8) bool {
@@ -354,6 +436,24 @@ test "configPrimaryModelForSelection keeps explicit configured custom provider p
     defer allocator.free(primary);
     try std.testing.expectEqualStrings("customgw/model-a", primary);
 }
+
+test "parseSlashCommand strips bot mention from command name" {
+    const parsed = parseSlashCommand("/model@nullclaw_bot openrouter/inception/mercury") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("model", parsed.name);
+    try std.testing.expectEqualStrings("openrouter/inception/mercury", parsed.arg);
+}
+
+test "parseSlashCommand strips bot mention with colon separator" {
+    const parsed = parseSlashCommand("/model@nullclaw_bot: gpt-5.2") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("model", parsed.name);
+    try std.testing.expectEqualStrings("gpt-5.2", parsed.arg);
+}
+
+test "resolveModelAlias supports g3f and sonnet shortcuts" {
+    try std.testing.expectEqualStrings("openrouter/google/gemini-3-flash-preview", resolveModelAlias("g3f"));
+    try std.testing.expectEqualStrings("anthropic/claude-sonnet-4-6", resolveModelAlias("sonnet"));
+}
+
 
 test "bareSessionResetPrompt returns prompt for bare /new" {
     const prompt = bareSessionResetPrompt("/new") orelse return error.TestExpectedEqual;
@@ -530,6 +630,47 @@ test "hotApplyConfigChange updates agent status_show_emojis" {
     );
     try std.testing.expect(applied);
     try std.testing.expect(!dummy.status_show_emojis);
+}
+
+test "hotApplyConfigChange model primary keeps provider-aware fallback limits" {
+    const allocator = std.testing.allocator;
+    var dummy = struct {
+        allocator: std.mem.Allocator,
+        model_name: []const u8,
+        model_name_owned: bool,
+        default_provider: []const u8,
+        default_provider_owned: bool,
+        default_model: []const u8,
+        token_limit: u64,
+        token_limit_override: ?u64,
+        max_tokens: u32,
+        max_tokens_override: ?u32,
+    }{
+        .allocator = allocator,
+        .model_name = "old-model",
+        .model_name_owned = false,
+        .default_provider = "openrouter",
+        .default_provider_owned = false,
+        .default_model = "old-model",
+        .token_limit = 1024,
+        .token_limit_override = null,
+        .max_tokens = 128,
+        .max_tokens_override = null,
+    };
+    defer if (dummy.model_name_owned) allocator.free(dummy.model_name);
+    defer if (dummy.default_provider_owned) allocator.free(dummy.default_provider);
+
+    const applied = try hotApplyConfigChange(
+        &dummy,
+        .set,
+        "agents.defaults.model.primary",
+        "\"qianfan/custom-model\"",
+    );
+    try std.testing.expect(applied);
+    try std.testing.expectEqualStrings("custom-model", dummy.model_name);
+    try std.testing.expectEqualStrings("qianfan", dummy.default_provider);
+    try std.testing.expectEqual(@as(u64, 98_304), dummy.token_limit);
+    try std.testing.expectEqual(@as(u32, 32_768), dummy.max_tokens);
 }
 
 test "splitPrimaryModelRef parses provider model format" {
@@ -2310,6 +2451,7 @@ fn hotApplyConfigChange(
         defer self.allocator.free(primary);
         const parsed = splitPrimaryModelRef(primary) orelse return false;
         try setModelName(self, parsed.model);
+        refreshModelLimits(self, primary);
         try setDefaultProvider(self, parsed.provider);
         if (@hasField(@TypeOf(self.*), "default_model")) {
             self.default_model = self.model_name;
@@ -2748,7 +2890,15 @@ pub fn handleSlashCommand(self: anytype, message: []const u8) !?[]const u8 {
                     .{self.model_name},
                 );
             }
-            try setModelName(self, cmd.arg);
+            const resolved = resolveModelAlias(cmd.arg);
+            try swapProviderIfNeeded(self, resolved);
+            // Strip provider prefix for model name (Anthropic expects "claude-opus-4-6", not "anthropic/claude-opus-4-6")
+            if (splitPrimaryModelRef(resolved)) |parsed| {
+                try setModelName(self, parsed.model);
+                refreshModelLimits(self, resolved);
+            } else {
+                try setModelName(self, resolved);
+            }
             if (@hasField(@TypeOf(self.*), "model_pinned_by_user")) {
                 self.model_pinned_by_user = true;
             }
@@ -2759,14 +2909,14 @@ pub fn handleSlashCommand(self: anytype, message: []const u8) !?[]const u8 {
                 self.default_model = self.model_name;
             }
             invalidateSystemPromptCache(self);
-            persistSelectedModelToConfig(self, cmd.arg) catch |err| {
+            persistSelectedModelToConfig(self, resolved) catch |err| {
                 return try std.fmt.allocPrint(
                     self.allocator,
                     "Switched to model: {s}\nWarning: could not persist model to config.json ({s})",
-                    .{ cmd.arg, @errorName(err) },
+                    .{ resolved, @errorName(err) },
                 );
             };
-            return try std.fmt.allocPrint(self.allocator, "Switched to model: {s}", .{cmd.arg});
+            return try std.fmt.allocPrint(self.allocator, "Switched to model: {s}", .{resolved});
         },
         .think => return try handleThinkCommand(self, cmd.arg),
         .verbose => return try handleVerboseCommand(self, cmd.arg),

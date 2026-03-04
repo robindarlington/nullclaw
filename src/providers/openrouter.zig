@@ -155,7 +155,10 @@ pub const OpenRouterProvider = struct {
                         if (tc_obj.get("function")) |func| {
                             const func_obj = func.object;
                             const name = if (func_obj.get("name")) |n| (if (n == .string) try allocator.dupe(u8, n.string) else try allocator.dupe(u8, "")) else try allocator.dupe(u8, "");
-                            const arguments = if (func_obj.get("arguments")) |a| (if (a == .string) try allocator.dupe(u8, a.string) else try allocator.dupe(u8, "{}")) else try allocator.dupe(u8, "{}");
+                            const arguments = if (func_obj.get("arguments")) |a| switch (a) {
+                                .string => try allocator.dupe(u8, a.string),
+                                else => try std.json.Stringify.valueAlloc(allocator, a, .{}),
+                            } else try allocator.dupe(u8, "{}");
 
                             try tool_calls_list.append(allocator, .{
                                 .id = id,

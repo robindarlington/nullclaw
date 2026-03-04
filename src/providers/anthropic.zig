@@ -4,6 +4,7 @@ const sse = @import("sse.zig");
 const error_classify = @import("error_classify.zig");
 const config_types = @import("../config_types.zig");
 const http_util = @import("../http_util.zig");
+const platform = @import("../platform.zig");
 
 const Provider = root.Provider;
 const ChatMessage = root.ChatMessage;
@@ -57,6 +58,57 @@ pub const AnthropicProvider = struct {
     /// Check if the credential is a setup/OAuth token (Bearer auth).
     pub fn isSetupToken(token: []const u8) bool {
         return std.mem.startsWith(u8, token, "sk-ant-oat01-");
+    }
+
+    /// Resolve the credential for an API call.
+    /// Priority: configured api_key > Claude Code OAuth token from ~/.claude/.credentials.json
+    /// The caller must free the returned slice if `needs_free` is true.
+    const ResolvedCredential = struct {
+        value: []const u8,
+        needs_free: bool,
+    };
+
+    fn resolveCredential(self: *AnthropicProvider) ResolvedCredential {
+        if (self.credential) |cred| return .{ .value = cred, .needs_free = false };
+        return readClaudeCodeToken(self.allocator) catch return .{ .value = "", .needs_free = false };
+    }
+
+    /// Read the OAuth access token from Claude Code's credentials file.
+    fn readClaudeCodeToken(allocator: std.mem.Allocator) !ResolvedCredential {
+        const home = try platform.getHomeDir(allocator);
+        defer allocator.free(home);
+
+        const path = try std.fs.path.join(allocator, &.{ home, ".claude", ".credentials.json" });
+        defer allocator.free(path);
+
+        const file = try std.fs.openFileAbsolute(path, .{});
+        defer file.close();
+
+        const contents = file.readToEndAlloc(allocator, 8192) catch return error.ReadFailed;
+        defer allocator.free(contents);
+
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, contents, .{}) catch return error.ParseFailed;
+        defer parsed.deinit();
+
+        const oauth_obj = switch (parsed.value) {
+            .object => |o| o.get("claudeAiOauth") orelse return error.MissingField,
+            else => return error.ParseFailed,
+        };
+        const inner = switch (oauth_obj) {
+            .object => |o| o,
+            else => return error.ParseFailed,
+        };
+        const token_val = inner.get("accessToken") orelse return error.MissingField;
+        const token_str = switch (token_val) {
+            .string => |s| s,
+            else => return error.ParseFailed,
+        };
+        if (token_str.len == 0) return error.MissingField;
+
+        return .{
+            .value = try allocator.dupe(u8, token_str),
+            .needs_free = true,
+        };
     }
 
     /// Build the messages endpoint URL.
@@ -192,7 +244,7 @@ pub const AnthropicProvider = struct {
 
                     var arguments: []const u8 = "{}";
                     if (obj.get("input")) |input| {
-                        arguments = try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(input, .{})});
+                        arguments = try std.json.Stringify.valueAlloc(allocator, input, .{});
                     }
 
                     try tool_calls_list.append(allocator, .{
@@ -257,7 +309,10 @@ pub const AnthropicProvider = struct {
         temperature: f64,
     ) anyerror![]const u8 {
         const self: *AnthropicProvider = @ptrCast(@alignCast(ptr));
-        const credential = self.credential orelse return error.CredentialsNotSet;
+        const resolved = self.resolveCredential();
+        defer if (resolved.needs_free) allocator.free(resolved.value);
+        const credential = resolved.value;
+        if (credential.len == 0) return error.CredentialsNotSet;
         const is_oauth = isSetupToken(credential);
 
         // URL: stack-allocated (base_url + path is bounded)
@@ -298,7 +353,10 @@ pub const AnthropicProvider = struct {
         temperature: f64,
     ) anyerror!ChatResponse {
         const self: *AnthropicProvider = @ptrCast(@alignCast(ptr));
-        const credential = self.credential orelse return error.CredentialsNotSet;
+        const resolved = self.resolveCredential();
+        defer if (resolved.needs_free) allocator.free(resolved.value);
+        const credential = resolved.value;
+        if (credential.len == 0) return error.CredentialsNotSet;
         const is_oauth = isSetupToken(credential);
 
         // URL: stack-allocated (base_url + path is bounded)
@@ -358,7 +416,10 @@ pub const AnthropicProvider = struct {
         callback_ctx: *anyopaque,
     ) anyerror!root.StreamChatResult {
         const self: *AnthropicProvider = @ptrCast(@alignCast(ptr));
-        const credential = self.credential orelse return error.CredentialsNotSet;
+        const resolved = self.resolveCredential();
+        defer if (resolved.needs_free) allocator.free(resolved.value);
+        const credential = resolved.value;
+        if (credential.len == 0) return error.CredentialsNotSet;
 
         var url_buf: [2048]u8 = undefined;
         const url = std.fmt.bufPrint(&url_buf, "{s}/v1/messages", .{self.base_url}) catch return error.AnthropicApiError;

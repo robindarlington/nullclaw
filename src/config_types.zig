@@ -104,6 +104,9 @@ pub const AutonomyConfig = struct {
     /// When true, skip the single-`&` shell-operator check so that bare
     /// `&` in URLs (e.g. `curl https://...?a=1&b=2`) is permitted.
     allow_raw_url_chars: bool = false,
+    /// Commands that are always denied, even when allowed_commands is ["*"].
+    /// Checked before the allowlist so a blocked command can never execute.
+    blocked_commands: []const []const u8 = &.{},
     /// Additional directories (absolute paths) the agent may access beyond workspace_dir.
     /// Resolved via realpath at check time; system-critical paths are always blocked.
     allowed_paths: []const []const u8 = &.{},
@@ -1214,6 +1217,9 @@ pub const HttpRequestConfig = struct {
     /// Optional outbound proxy URL used for provider/network curl requests.
     /// Supported schemes: http://, https://, socks5://
     proxy: ?[]const u8 = null,
+    /// Local/private hosts allowed to bypass SSRF protection.
+    /// Example: ["127.0.0.1", "localhost"]
+    trusted_local_hosts: []const []const u8 = &.{},
     /// Optional SearXNG instance URL used by web_search as a fallback when
     /// BRAVE_API_KEY is not available.
     /// HTTPS is allowed for any host. Plain HTTP is allowed only for local or

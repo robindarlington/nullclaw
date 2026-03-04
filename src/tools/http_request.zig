@@ -13,6 +13,7 @@ const log = std.log.scoped(.http_request);
 /// domain allowlisting, SSRF protection, and header redaction.
 pub const HttpRequestTool = struct {
     allowed_domains: []const []const u8 = &.{}, // empty = allow all
+    trusted_local_hosts: []const []const u8 = &.{},
     max_response_size: u32 = 1_000_000,
 
     pub const tool_name = "http_request";
@@ -49,22 +50,27 @@ pub const HttpRequestTool = struct {
         const default_port: u16 = if (std.ascii.eqlIgnoreCase(uri.scheme, "https")) 443 else 80;
         const resolved_port: u16 = uri.port orelse default_port;
 
-        // SSRF protection and DNS-rebinding hardening:
-        // resolve once, validate global address, and connect directly to it.
         const host = net_security.extractHost(url) orelse
             return ToolResult.fail("Invalid URL: cannot extract host");
-        const connect_host = net_security.resolveConnectHost(allocator, host, resolved_port) catch |err| switch (err) {
-            error.LocalAddressBlocked => return ToolResult.fail("Blocked local/private host"),
-            else => return ToolResult.fail("Unable to verify host safety"),
-        };
-        defer allocator.free(connect_host);
 
-        // Check domain allowlist
+        // Check domain allowlist (if non-empty, only listed hosts are allowed)
         if (self.allowed_domains.len > 0) {
             if (!net_security.hostMatchesAllowlist(host, self.allowed_domains)) {
                 return ToolResult.fail("Host is not in http_request.allowed_domains");
             }
         }
+
+        // SSRF protection — skip for hosts in trusted_local_hosts
+        const is_trusted_local = self.trusted_local_hosts.len > 0 and
+            net_security.hostMatchesAllowlist(host, self.trusted_local_hosts);
+        const connect_host = if (is_trusted_local)
+            try allocator.dupe(u8, host)
+        else
+            net_security.resolveConnectHost(allocator, host, resolved_port) catch |err| switch (err) {
+                error.LocalAddressBlocked => return ToolResult.fail("Blocked local/private host"),
+                else => return ToolResult.fail("Unable to verify host safety"),
+            };
+        defer allocator.free(connect_host);
 
         // Validate method
         const method = validateMethod(method_str) orelse {

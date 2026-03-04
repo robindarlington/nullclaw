@@ -255,6 +255,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         .workspace_dir = cfg.workspace_dir,
         .workspace_only = cfg.autonomy.workspace_only,
         .allowed_commands = security.resolveAllowedCommands(cfg.autonomy.level, cfg.autonomy.allowed_commands),
+        .blocked_commands = cfg.autonomy.blocked_commands,
         .max_actions_per_hour = cfg.autonomy.max_actions_per_hour,
         .require_approval_for_medium_risk = cfg.autonomy.require_approval_for_medium_risk,
         .block_high_risk_commands = cfg.autonomy.block_high_risk_commands,
@@ -297,6 +298,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     const tools = try tools_mod.allTools(allocator, cfg.workspace_dir, .{
         .http_enabled = cfg.http_request.enabled,
         .http_allowed_domains = cfg.http_request.allowed_domains,
+        .http_trusted_local_hosts = cfg.http_request.trusted_local_hosts,
         .http_max_response_size = cfg.http_request.max_response_size,
         .http_timeout_secs = cfg.http_request.timeout_secs,
         .web_search_base_url = cfg.http_request.search_base_url,

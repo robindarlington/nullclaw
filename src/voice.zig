@@ -331,18 +331,19 @@ pub fn transcribeTelegramVoice(
     bot_token: []const u8,
     file_id: []const u8,
     t: ?Transcriber,
+    proxy: ?[]const u8,
 ) ?[]const u8 {
     const transcr = t orelse return null;
 
     // 1. Call getFile to get file_path
-    const tg_file_path = getFilePath(allocator, bot_token, file_id) catch |err| {
+    const tg_file_path = getFilePath(allocator, bot_token, file_id, proxy) catch |err| {
         log.err("getFile failed: {}", .{err});
         return null;
     };
     defer allocator.free(tg_file_path);
 
     // 2. Download file via Telegram API
-    const local_path = downloadTelegramFile(allocator, bot_token, tg_file_path) catch |err| {
+    const local_path = downloadTelegramFile(allocator, bot_token, tg_file_path, proxy) catch |err| {
         log.err("download failed: {}", .{err});
         return null;
     };
@@ -362,7 +363,7 @@ pub fn transcribeTelegramVoice(
 }
 
 /// Call Telegram getFile API and extract the file_path from the response.
-fn getFilePath(allocator: std.mem.Allocator, bot_token: []const u8, file_id: []const u8) ![]u8 {
+fn getFilePath(allocator: std.mem.Allocator, bot_token: []const u8, file_id: []const u8, proxy: ?[]const u8) ![]u8 {
     var url_buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&url_buf);
     try fbs.writer().print("https://api.telegram.org/bot{s}/getFile", .{bot_token});
@@ -375,7 +376,7 @@ fn getFilePath(allocator: std.mem.Allocator, bot_token: []const u8, file_id: []c
     try json_util.appendJsonString(&body_list, allocator, file_id);
     try body_list.appendSlice(allocator, "}");
 
-    const resp = try http_util.curlPost(allocator, url, body_list.items, &.{});
+    const resp = try http_util.curlPostWithProxy(allocator, url, body_list.items, &.{}, proxy, "30");
     defer allocator.free(resp);
 
     // Parse response
@@ -390,13 +391,13 @@ fn getFilePath(allocator: std.mem.Allocator, bot_token: []const u8, file_id: []c
 }
 
 /// Download a file from Telegram and save to temp dir. Returns the local path (owned).
-fn downloadTelegramFile(allocator: std.mem.Allocator, bot_token: []const u8, tg_file_path: []const u8) ![]u8 {
+fn downloadTelegramFile(allocator: std.mem.Allocator, bot_token: []const u8, tg_file_path: []const u8, proxy: ?[]const u8) ![]u8 {
     var url_buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&url_buf);
     try fbs.writer().print("https://api.telegram.org/file/bot{s}/{s}", .{ bot_token, tg_file_path });
     const url = fbs.getWritten();
 
-    const data = try http_util.curlGet(allocator, url, &.{}, "30");
+    const data = try http_util.curlGetWithProxy(allocator, url, &.{}, "30", proxy);
     defer allocator.free(data);
 
     // Save to temp file (platform-aware temp dir)
@@ -548,7 +549,7 @@ test "voice transcribeFile returns error for nonexistent file" {
 
 test "voice transcribeTelegramVoice returns null without transcriber" {
     // No transcriber configured, so should return null
-    const result = transcribeTelegramVoice(std.testing.allocator, "fake:token", "fake_file_id", null);
+    const result = transcribeTelegramVoice(std.testing.allocator, "fake:token", "fake_file_id", null, null);
     try std.testing.expect(result == null);
 }
 

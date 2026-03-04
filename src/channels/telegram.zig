@@ -1887,7 +1887,7 @@ pub const TelegramChannel = struct {
     }
 
     fn buildVoiceContent(self: *TelegramChannel, allocator: std.mem.Allocator, file_id: []const u8) ?[]u8 {
-        const transcribed = voice.transcribeTelegramVoice(allocator, self.bot_token, file_id, self.transcriber) orelse return null;
+        const transcribed = voice.transcribeTelegramVoice(allocator, self.bot_token, file_id, self.transcriber, self.proxy) orelse return null;
         defer allocator.free(transcribed);
 
         var result: std.ArrayListUnmanaged(u8) = .empty;
