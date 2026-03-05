@@ -15,6 +15,15 @@ const ToolCall = root.ToolCall;
 const ToolSpec = root.ToolSpec;
 const TokenUsage = root.TokenUsage;
 
+/// Strip "anthropic/" prefix from model names so the API receives bare model IDs.
+fn stripProviderPrefix(model: []const u8) []const u8 {
+    const prefix = "anthropic/";
+    if (model.len > prefix.len and std.ascii.startsWithIgnoreCase(model, prefix)) {
+        return model[prefix.len..];
+    }
+    return model;
+}
+
 /// Anthropic Claude API provider.
 ///
 /// Supports:
@@ -322,7 +331,7 @@ pub const AnthropicProvider = struct {
         else
             std.fmt.bufPrint(&url_buf, "{s}/v1/messages", .{self.base_url}) catch return error.AnthropicApiError;
 
-        const body = try buildSimpleRequestBody(allocator, system_prompt, message, model, temperature);
+        const body = try buildSimpleRequestBody(allocator, system_prompt, message, stripProviderPrefix(model), temperature);
         defer allocator.free(body);
 
         // Build auth header directly on stack (avoids intermediate heap alloc)
@@ -366,7 +375,7 @@ pub const AnthropicProvider = struct {
         else
             std.fmt.bufPrint(&url_buf, "{s}/v1/messages", .{self.base_url}) catch return error.AnthropicApiError;
 
-        const body = try buildChatRequestBody(allocator, request, model, temperature);
+        const body = try buildChatRequestBody(allocator, request, stripProviderPrefix(model), temperature);
         defer allocator.free(body);
 
         // Build auth header directly on stack (avoids intermediate heap alloc)
@@ -424,7 +433,7 @@ pub const AnthropicProvider = struct {
         var url_buf: [2048]u8 = undefined;
         const url = std.fmt.bufPrint(&url_buf, "{s}/v1/messages", .{self.base_url}) catch return error.AnthropicApiError;
 
-        const body = try buildStreamingChatRequestBody(allocator, request, model, temperature);
+        const body = try buildStreamingChatRequestBody(allocator, request, stripProviderPrefix(model), temperature);
         defer allocator.free(body);
 
         // Build auth header directly on stack

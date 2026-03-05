@@ -230,6 +230,8 @@ pub const Agent = struct {
 
     allocator: std.mem.Allocator,
     provider: Provider,
+    /// Heap-allocated provider holder created by /model swap; freed on deinit.
+    swapped_provider_holder: ?*providers.ProviderHolder = null,
     tools: []const Tool,
     tool_specs: []const ToolSpec,
     mem: ?Memory,
@@ -497,6 +499,10 @@ pub const Agent = struct {
     }
 
     pub fn deinit(self: *Agent) void {
+        if (self.swapped_provider_holder) |h| {
+            h.deinit();
+            self.allocator.destroy(h);
+        }
         if (self.bootstrap) |bp| bp.deinit();
         if (self.model_name_owned) self.allocator.free(self.model_name);
         if (self.default_provider_owned) self.allocator.free(self.default_provider);

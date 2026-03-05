@@ -292,6 +292,15 @@ fn swapProviderIfNeeded(self: anytype, model: []const u8) !void {
         null,
     );
 
+    // Free previous swapped holder if any
+    if (@hasField(@TypeOf(self.*), "swapped_provider_holder")) {
+        if (self.swapped_provider_holder) |old| {
+            old.deinit();
+            self.allocator.destroy(old);
+        }
+        self.swapped_provider_holder = holder;
+    }
+
     self.provider = holder.provider();
     try setDefaultProvider(self, parsed.provider);
 }
