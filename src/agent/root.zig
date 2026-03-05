@@ -91,6 +91,7 @@ pub const Agent = struct {
         tokens,
         full,
         cost,
+        context,
 
         pub fn toSlice(self: UsageMode) []const u8 {
             return switch (self) {
@@ -98,6 +99,7 @@ pub const Agent = struct {
                 .tokens => "tokens",
                 .full => "full",
                 .cost => "cost",
+                .context => "context",
             };
         }
     };

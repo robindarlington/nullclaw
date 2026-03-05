@@ -30,9 +30,11 @@ const MODEL_WINDOWS = [_]ContextWindowEntry{
     .{ .key = "gpt-4.1", .tokens = 128_000 },
     .{ .key = "gpt-4.1-mini", .tokens = 128_000 },
     .{ .key = "o3-mini", .tokens = 128_000 },
-    .{ .key = "gemini-2.5-pro", .tokens = 200_000 },
-    .{ .key = "gemini-2.5-flash", .tokens = 200_000 },
-    .{ .key = "gemini-2.0-flash", .tokens = 200_000 },
+    .{ .key = "gemini-3-flash-preview", .tokens = 1_000_000 },
+    .{ .key = "gemini-3-flash", .tokens = 1_000_000 },
+    .{ .key = "gemini-2.5-pro", .tokens = 1_000_000 },
+    .{ .key = "gemini-2.5-flash", .tokens = 1_000_000 },
+    .{ .key = "gemini-2.0-flash", .tokens = 1_000_000 },
     .{ .key = "deepseek-v3.2", .tokens = 128_000 },
     .{ .key = "deepseek-chat", .tokens = 128_000 },
     .{ .key = "deepseek-reasoner", .tokens = 128_000 },
@@ -135,7 +137,7 @@ fn inferFromModelPattern(model_id: []const u8) ?u64 {
         return 128_000;
     }
 
-    if (startsWithIgnoreCase(model_id, "gemini-")) return 200_000;
+    if (startsWithIgnoreCase(model_id, "gemini-")) return 1_000_000;
     if (startsWithIgnoreCase(model_id, "deepseek-")) return 128_000;
     if (startsWithIgnoreCase(model_id, "llama") or startsWithIgnoreCase(model_id, "mixtral-")) return 128_000;
 

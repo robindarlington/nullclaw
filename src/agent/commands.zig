@@ -1210,6 +1210,7 @@ fn parseUsageMode(comptime T: type, raw: []const u8) ?T {
     if (std.ascii.eqlIgnoreCase(raw, "tokens")) return .tokens;
     if (std.ascii.eqlIgnoreCase(raw, "full")) return .full;
     if (std.ascii.eqlIgnoreCase(raw, "cost")) return .cost;
+    if (std.ascii.eqlIgnoreCase(raw, "context") or std.ascii.eqlIgnoreCase(raw, "ctx")) return .context;
     return null;
 }
 
@@ -1579,7 +1580,7 @@ fn handleUsageCommand(self: anytype, arg: []const u8) ![]const u8 {
     }
 
     self.usage_mode = parseUsageMode(@TypeOf(self.usage_mode), mode) orelse
-        return try self.allocator.dupe(u8, "Invalid /usage value. Use: off|tokens|full|cost");
+        return try self.allocator.dupe(u8, "Invalid /usage value. Use: off|tokens|full|cost|context");
     return try std.fmt.allocPrint(self.allocator, "Usage mode set to: {s}", .{self.usage_mode.toSlice()});
 }
 
@@ -2815,6 +2816,16 @@ pub fn composeFinalReply(
             "\n\n[usage] prompt={d} completion={d} total={d} (cost estimate unavailable)",
             .{ usage.prompt_tokens, usage.completion_tokens, usage.total_tokens },
         ),
+        .context => {
+            const token_est = self.tokenEstimate();
+            const token_limit: u64 = if (@hasField(@TypeOf(self.*), "token_limit")) self.token_limit else 200_000;
+            const pct: u64 = if (token_limit > 0) (token_est * 100) / token_limit else 0;
+            const msg_count = self.history.items.len;
+            const est_k = token_est / 1000;
+            const limit_k = token_limit / 1000;
+            const warn: []const u8 = if (pct > 80) " \xe2\x9a\xa0" else "";
+            try w.print("\n\n[ctx {d}% | {d}k/{d}k tokens | {d} msgs{s}]", .{ pct, est_k, limit_k, msg_count, warn });
+        },
     }
 
     return try out.toOwnedSlice(self.allocator);
