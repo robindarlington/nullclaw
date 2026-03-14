@@ -2913,13 +2913,8 @@ pub fn handleSlashCommand(self: anytype, message: []const u8) !?[]const u8 {
             }
             const resolved = resolveModelAlias(cmd.arg);
             try swapProviderIfNeeded(self, resolved);
-            // Strip provider prefix for model name (Anthropic expects "claude-opus-4-6", not "anthropic/claude-opus-4-6")
-            if (splitPrimaryModelRef(resolved)) |parsed| {
-                try setModelName(self, parsed.model);
-                refreshModelLimits(self, resolved);
-            } else {
-                try setModelName(self, resolved);
-            }
+            try setModelName(self, resolved);
+            refreshModelLimits(self, resolved);
             if (@hasField(@TypeOf(self.*), "model_pinned_by_user")) {
                 self.model_pinned_by_user = true;
             }
